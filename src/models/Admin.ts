@@ -29,9 +29,9 @@ adminSchema.methods.matchPassword = async function (enteredPassword: string) {
 };
 
 // Encrypt password before saving
-adminSchema.pre('save', async function (next) {
+adminSchema.pre('save', async function () {
   if (!this.isModified('password')) {
-    next();
+    return;
   }
 
   const salt = await bcrypt.genSalt(10);
