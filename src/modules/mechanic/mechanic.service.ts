@@ -75,6 +75,7 @@ export const createMechanicService = async (mechanicData: Partial<IMechanic>) =>
   // If kycStatus is 'pending', mechanic status MUST be 'pending'.
   const initialKycStatus = mechanicData.kycStatus === 'approved' ? 'approved' : 'pending';
   const initialStatus = initialKycStatus === 'approved' ? (mechanicData.status || 'active') : 'pending';
+  const initialRadius = typeof mechanicData.radius === 'number' && mechanicData.radius > 0 ? mechanicData.radius : 5;
 
   const processedKyc: IKycDocument[] = (mechanicData.kyc || []).map((doc) => ({
     ...doc,
@@ -86,6 +87,7 @@ export const createMechanicService = async (mechanicData: Partial<IMechanic>) =>
     kyc: processedKyc,
     kycStatus: initialKycStatus,
     status: initialStatus,
+    radius: initialRadius,
   });
 
   await mechanic.save();
