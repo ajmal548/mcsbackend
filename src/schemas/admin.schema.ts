@@ -4,6 +4,10 @@ import bcrypt from 'bcryptjs';
 export interface IAdmin extends Document {
   email: string;
   password?: string;
+  accessTokenVersion?: number;
+  tokenVersion?: number;
+  createdAt?: Date;
+  updatedAt?: Date;
   matchPassword(enteredPassword: string): Promise<boolean>;
 }
 
@@ -17,6 +21,14 @@ const adminSchema = new Schema(
     password: {
       type: String,
       required: true,
+    },
+    accessTokenVersion: {
+      type: Number,
+      default: 0,
+    },
+    tokenVersion: {
+      type: Number,
+      default: 0,
     },
   },
   {
