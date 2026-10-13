@@ -8,20 +8,16 @@ const getCloudinary = () => {
   if (!configured) {
     const { CLOUDINARY_URL, CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET } = process.env;
 
-    if (CLOUDINARY_URL) {
-      // Cloudinary SDK automatically parses CLOUDINARY_URL from env or config object
-      cloudinary.config({
-        cloudinary_url: CLOUDINARY_URL,
-        secure: true,
-      });
-      configured = true;
-    } else if (CLOUDINARY_CLOUD_NAME && CLOUDINARY_API_KEY && CLOUDINARY_API_SECRET) {
+    if (CLOUDINARY_CLOUD_NAME && CLOUDINARY_API_KEY && CLOUDINARY_API_SECRET) {
       cloudinary.config({
         cloud_name: CLOUDINARY_CLOUD_NAME,
         api_key: CLOUDINARY_API_KEY,
         api_secret: CLOUDINARY_API_SECRET,
         secure: true,
       });
+      configured = true;
+    } else if (CLOUDINARY_URL) {
+      cloudinary.config(true); // Forces SDK to parse process.env.CLOUDINARY_URL
       configured = true;
     } else {
       throw new AppError('Cloudinary is not configured. Check CLOUDINARY_* env variables.', 500);
