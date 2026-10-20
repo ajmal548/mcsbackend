@@ -1,0 +1,111 @@
+================================================================================
+MYCARSOL BACKEND — GENERAL MONGOOSE SCHEMA DESIGN & RULES
+================================================================================
+
+1. EXTRACT NESTED STRUCTURES INTO EXPLICIT SUB-SCHEMAS
+--------------------------------------------------------------------------------
+- Any nested object containing multiple fields must be extracted into its own
+  typed Mongoose Schema rather than being defined inline as generic Object or
+  `mongoose.Schema.Types.Mixed`.
+- Sub-schemas promote modularity, strong typing, and reusability across models.
+- Set `{ _id: false }` on sub-schemas unless the subdocument requires independent
+  querying or mutation by its own ObjectId.
+
+Generalized Example:
+    import { Schema, Document, model } from 'mongoose';
+
+    const AddressSchema = new Schema(
+      {
+        street: { type: String, required: true, trim: true },
+        city: { type: String, required: true, trim: true },
+        state: { type: String, required: true, trim: true },
+        postalCode: { type: String, required: true, trim: true },
+        countryCode: { type: String, required: true, trim: true, uppercase: true },
+      },
+      { _id: false }
+    );
+
+    const UserSchema = new Schema(
+      {
+        email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+        address: { type: AddressSchema, default: () => ({}) },
+      },
+      { timestamps: true }
+    );
+
+
+2. DISABLE SUBDOCUMENT IDS (_id: false)
+--------------------------------------------------------------------------------
+- For nested configurations, metadata, sub-settings, address objects, or item details
+  that are queried/mutated exclusively as part of the parent document, ALWAYS set `{ _id: false }`.
+- Only leave `_id: true` enabled if the subdocument must be individually queried,
+  referenced by ObjectId in client requests, or targeted with arrayFilters.
+
+
+3. CONSISTENT DEFAULT INITIALIZATION
+--------------------------------------------------------------------------------
+- Always provide explicit `default` values for sub-schemas and arrays to prevent
+  runtime `undefined` errors when reading nested properties:
+    * Arrays:      `{ type: [SubSchema], default: [] }`
+    * Objects:     `{ type: SubSchema, default: () => ({}) }`
+    * Flags:       `{ type: Boolean, default: true } isActive: boolean;`
+    * Soft Delete: `{ type: Boolean, default: false } isDeleted: boolean;`
+    * Soft Delete Timestamp: `{ type: Date, default: null } deletedAt: Date | null;`
+    * Timestamps:  `{ timestamps: true }` enabled on all root schemas.
+
+
+4. STRICT ENUM CONSTRAINTS & CONSTANTS
+--------------------------------------------------------------------------------
+- Never hardcode string literals for statuses, types, roles, or categories in schemas.
+- Define centralized TypeScript enums and wire them directly into schema definitions:
+    export enum UserRole {
+      ADMIN = 'ADMIN',
+      MECHANIC = 'MECHANIC',
+      CUSTOMER = 'CUSTOMER',
+    }
+
+    const UserSchema = new Schema({
+      role: {
+        type: String,
+        enum: Object.values(UserRole),
+        default: UserRole.CUSTOMER,
+        required: true,
+      },
+    });
+
+
+5. COMPOUND INDEXES & PARTIAL FILTER EXPRESSIONS
+--------------------------------------------------------------------------------
+- Indexes must be declared for every query pattern (filtering, sorting, searching).
+- Use compound indexes with `partialFilterExpression` on soft-deleted entities to
+  ensure uniqueness only across active (non-deleted) records:
+
+Generalized Example:
+    // Ensure slug uniqueness only among active categories
+    CategorySchema.index(
+      { slug: 1 },
+      { unique: true, partialFilterExpression: { isDeleted: { $ne: true } } }
+    );
+
+    // Compound index for mechanic searches by location and category
+    MechanicProfileSchema.index(
+      { categoryId: 1, isAvailable: 1, isDeleted: 1 }
+    );
+
+
+6. FINANCIAL DATA & MONEY STORAGE
+--------------------------------------------------------------------------------
+- NEVER store monetary values as floating-point numbers due to floating-point rounding errors.
+- Store money as integer minor units (e.g. cents/fils/paise: $10.50 -> 1050)
+  or use `Schema.Types.Decimal128`.
+- Clearly document currency units in field naming (e.g., `amountInCents`, `priceInMinorUnits`).
+
+
+7. VIRTUALS & DEFENSIVE LEAN SERIALIZATION
+--------------------------------------------------------------------------------
+- Enable virtuals on all Mongoose schemas:
+    Schema.set('toJSON', { virtuals: true });
+    Schema.set('toObject', { virtuals: true });
+- Define virtual relations using `Schema.virtual(...)` for cross-collection references.
+- Always use `.lean()` on read queries or `.toObject()` on document instances to
+  strip Mongoose internal state (`$__`, `$__parent`, `_doc`, `__v`) before returning data.

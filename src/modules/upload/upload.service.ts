@@ -68,3 +68,15 @@ export const uploadCertificateService = async (file: Express.Multer.File, mechan
 
   return { ...certificate, mechanic };
 };
+
+export const deleteUploadedFileService = async (
+  publicId: string,
+  resourceType: 'image' | 'video' | 'raw' = 'image'
+) => {
+  if (!publicId || !publicId.trim()) {
+    throw new AppError('publicId is required to delete an uploaded file', 400);
+  }
+  const { deleteFromCloudinary } = await import('../../config/cloudinary.config');
+  const result = await deleteFromCloudinary(publicId.trim(), resourceType);
+  return { fileDeleted: true, publicId: publicId.trim(), result };
+};

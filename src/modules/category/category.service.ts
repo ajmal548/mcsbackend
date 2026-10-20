@@ -1,120 +1,179 @@
-import Category, { ICategory } from '../../schemas/category.schema';
-import AppError from '../../utils/appError';
+import { ConflictError, NotFoundError } from '../../utils/appError';
+import { categoryRepository, CategoryRepository } from './category.repository';
+import { toCategoryResponseDTO, toCategoryResponseDTOList } from './category.mapper';
+import {
+  CreateCategoryDTO,
+  UpdateCategoryDTO,
+  GetCategoriesQueryDTO,
+  CategoryResponseDTO,
+  CreateCategoryResponseDTO,
+  UpdateCategoryResponseDTO,
+  DeleteCategoryResponseDTO,
+} from './category.schema';
+import { PaginationMeta } from '../../utils/responseHandlers';
 
-// Helper slug generator
-const slugify = (text: string) => {
-  return text
-    .toString()
-    .toLowerCase()
-    .trim()
-    .replace(/\s+/g, '-')
-    .replace(/[^\w\-]+/g, '')
-    .replace(/\-\-+/g, '-');
-};
+export class CategoryService {
+  constructor(private readonly repository: CategoryRepository = categoryRepository) {}
 
-export const createCategoryService = async (categoryData: Partial<ICategory>) => {
-  if (!categoryData.name) {
-    throw new AppError('Category name is required', 400);
+  /**
+   * Generates a URL-friendly slug from text.
+   */
+  private generateSlug(text: string): string {
+    return text
+      .toString()
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, '-')
+      .replace(/[^\w\-]+/g, '')
+      .replace(/\-\-+/g, '-');
   }
 
-  const slug = categoryData.slug ? slugify(categoryData.slug) : slugify(categoryData.name);
+  /**
+   * Creates a new category after validating name and slug uniqueness.
+   */
+  async createCategory(dto: CreateCategoryDTO): Promise<CreateCategoryResponseDTO> {
+    const slug = dto.slug ? this.generateSlug(dto.slug) : this.generateSlug(dto.name);
 
-  const existingCategory = await Category.findOne({
-    $or: [{ name: categoryData.name }, { slug }],
-  });
-
-  if (existingCategory) {
-    throw new AppError('Category with this name or slug already exists', 400);
-  }
-
-  const category = new Category({
-    ...categoryData,
-    slug,
-  });
-
-  return await category.save();
-};
-
-export const getCategoriesService = async (queryParams: {
-  search?: string;
-  isActive?: string;
-  page?: string;
-  limit?: string;
-}) => {
-  const page = parseInt(queryParams.page || '1');
-  const limit = parseInt(queryParams.limit || '20');
-  const skip = (page - 1) * limit;
-
-  const filter: any = {};
-
-  if (queryParams.search) {
-    filter.$or = [
-      { name: { $regex: queryParams.search, $options: 'i' } },
-      { description: { $regex: queryParams.search, $options: 'i' } },
-      { types: { $regex: queryParams.search, $options: 'i' } },
-    ];
-  }
-
-  if (queryParams.isActive !== undefined) {
-    filter.isActive = queryParams.isActive === 'true';
-  }
-
-  const categories = await Category.find(filter)
-    .skip(skip)
-    .limit(limit)
-    .sort({ createdAt: -1 });
-
-  const total = await Category.countDocuments(filter);
-
-  return {
-    data: categories,
-    pagination: {
-      total,
-      page,
-      pages: Math.ceil(total / limit),
-    },
-  };
-};
-
-export const getCategoryByIdService = async (idOrSlug: string) => {
-  let category;
-  if (idOrSlug.match(/^[0-9a-fA-F]{24}$/)) {
-    category = await Category.findById(idOrSlug);
-  } else {
-    category = await Category.findOne({ slug: idOrSlug });
-  }
-
-  if (!category) {
-    throw new AppError('Category not found', 404);
-  }
-
-  return category;
-};
-
-export const updateCategoryService = async (id: string, updateData: Partial<ICategory>) => {
-  const category = await Category.findById(id);
-  if (!category) {
-    throw new AppError('Category not found', 404);
-  }
-
-  if (updateData.name && updateData.name !== category.name) {
-    const newSlug = updateData.slug ? slugify(updateData.slug) : slugify(updateData.name);
-    const existing = await Category.findOne({ _id: { $ne: id }, $or: [{ name: updateData.name }, { slug: newSlug }] });
+    // Business rule: Uniqueness check
+    const existing = await this.repository.findByNameOrSlug(dto.name, slug);
     if (existing) {
-      throw new AppError('Category with this name or slug already exists', 400);
+      throw new ConflictError('Category with this name or slug already exists', 'CATEGORY_ALREADY_EXISTS');
     }
-    updateData.slug = newSlug;
+
+    const created = await this.repository.create({
+      ...dto,
+      slug,
+      isDeleted: false,
+    });
+
+    return {
+      categoryCreated: true,
+      categoryId: created._id.toString(),
+    };
   }
 
-  Object.assign(category, updateData);
-  return await category.save();
-};
+  /**
+   * Retrieves paginated list of categories with optional search and active status filter.
+   */
+  async getCategories(query: GetCategoriesQueryDTO): Promise<{
+    items: CategoryResponseDTO[];
+    meta: PaginationMeta;
+  }> {
+    const page = query.page || 1;
+    const limit = query.limit || 20;
+    const skip = (page - 1) * limit;
 
-export const deleteCategoryService = async (id: string) => {
-  const category = await Category.findByIdAndDelete(id);
-  if (!category) {
-    throw new AppError('Category not found', 404);
+    const filter: Record<string, any> = {};
+
+    if (query.search) {
+      filter.$or = [
+        { name: { $regex: query.search, $options: 'i' } },
+        { description: { $regex: query.search, $options: 'i' } },
+        { types: { $regex: query.search, $options: 'i' } },
+      ];
+    }
+
+    if (query.isActive !== undefined) {
+      filter.isActive = query.isActive;
+    }
+
+    const { items, total } = await this.repository.findPaginated(filter, {
+      skip,
+      limit,
+      sort: { createdAt: -1 },
+    });
+
+    return {
+      items: toCategoryResponseDTOList(items),
+      meta: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit) || 1,
+      },
+    };
   }
 
-  return { message: 'Category deleted successfully' };
-};
+  /**
+   * Retrieves a single category by ObjectId or slug.
+   */
+  async getCategoryByIdOrSlug(idOrSlug: string): Promise<CategoryResponseDTO> {
+    const isObjectId = /^[0-9a-fA-F]{24}$/.test(idOrSlug);
+    const category = isObjectId
+      ? await this.repository.findById(idOrSlug)
+      : await this.repository.findBySlug(idOrSlug);
+
+    if (!category) {
+      throw new NotFoundError('Category not found', 'CATEGORY_NOT_FOUND');
+    }
+
+    return toCategoryResponseDTO(category);
+  }
+
+  /**
+   * Pattern B: Lean query + validate + atomic update.
+   */
+  async updateCategory(id: string, dto: UpdateCategoryDTO): Promise<UpdateCategoryResponseDTO> {
+    const existing = await this.repository.findById(id);
+    if (!existing) {
+      throw new NotFoundError('Category not found', 'CATEGORY_NOT_FOUND');
+    }
+
+    const updateFields: Record<string, any> = {};
+
+    // Validate name & slug uniqueness if changed
+    if (dto.name && dto.name !== existing.name) {
+      const newSlug = dto.slug ? this.generateSlug(dto.slug) : this.generateSlug(dto.name);
+      const duplicate = await this.repository.findByNameOrSlug(dto.name, newSlug, id);
+      if (duplicate) {
+        throw new ConflictError('Category with this name or slug already exists', 'CATEGORY_ALREADY_EXISTS');
+      }
+      updateFields.name = dto.name;
+      updateFields.slug = newSlug;
+    } else if (dto.slug && dto.slug !== existing.slug) {
+      const newSlug = this.generateSlug(dto.slug);
+      const duplicate = await this.repository.findBySlug(newSlug);
+      if (duplicate && duplicate._id.toString() !== id) {
+        throw new ConflictError('Category with this slug already exists', 'CATEGORY_ALREADY_EXISTS');
+      }
+      updateFields.slug = newSlug;
+    }
+
+    if (dto.description !== undefined) updateFields.description = dto.description;
+    if (dto.icon !== undefined) updateFields.icon = dto.icon;
+    if (dto.types !== undefined) updateFields.types = dto.types;
+    if (dto.fields !== undefined) updateFields.fields = dto.fields;
+    if (dto.isActive !== undefined) updateFields.isActive = dto.isActive;
+
+    if (Object.keys(updateFields).length > 0) {
+      const updated = await this.repository.atomicUpdate(id, updateFields);
+      if (!updated) {
+        throw new NotFoundError('Category not found or already deleted', 'CATEGORY_NOT_FOUND');
+      }
+    }
+
+    return { categoryUpdated: true };
+  }
+
+  /**
+   * Pattern A: Direct atomic soft delete.
+   */
+  async deleteCategory(id: string): Promise<DeleteCategoryResponseDTO> {
+    const deleted = await this.repository.softDelete(id);
+    if (!deleted) {
+      throw new NotFoundError('Category not found', 'CATEGORY_NOT_FOUND');
+    }
+
+    return { categoryDeleted: true };
+  }
+}
+
+export const categoryService = new CategoryService();
+export default categoryService;
+
+// Backward-compatible named function exports
+export const createCategoryService = (data: CreateCategoryDTO) => categoryService.createCategory(data);
+export const getCategoriesService = (query: GetCategoriesQueryDTO) => categoryService.getCategories(query);
+export const getCategoryByIdService = (idOrSlug: string) => categoryService.getCategoryByIdOrSlug(idOrSlug);
+export const updateCategoryService = (id: string, data: UpdateCategoryDTO) => categoryService.updateCategory(id, data);
+export const deleteCategoryService = (id: string) => categoryService.deleteCategory(id);

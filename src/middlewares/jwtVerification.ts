@@ -195,3 +195,24 @@ export const verifyAuth = async (
     return next(new AppError('Invalid token format', 401));
   }
 };
+
+export const verifySelfOrAdmin = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  return verifyAuth(req, res, (err?: any) => {
+    if (err) return next(err);
+
+    const targetId = req.params.id;
+    const isSelf = targetId && req.userId && req.userId.toString() === targetId.toString();
+    const isAdmin = req.role === 'admin';
+
+    if (isSelf || isAdmin) {
+      return next();
+    }
+
+    return next(new AppError('Forbidden: You can only access or modify your own mechanic account', 403));
+  });
+};
+

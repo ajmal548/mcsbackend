@@ -3,6 +3,7 @@ import adminPaths from './admin.paths';
 import * as controller from './admin.controller';
 import { handleError } from '../../utils/helpers';
 import validateRequest from '../../middlewares/validator';
+import { verifyAdmin } from '../../middlewares/jwtVerification';
 import {
   adminLoginSchema,
   adminCreateSchema,
@@ -14,34 +15,34 @@ import { loginMechanic } from '../mechanic/mechanic.controller';
 
 const router = Router();
 
-// Admin Login
+// Admin Login (Public)
 router.post(
   adminPaths.auth.login,
   validateRequest(adminLoginSchema),
   handleError(controller.login)
 );
 
-// Mechanic Login alias under /auth/mechanic/login
+// Mechanic Login alias under /auth/mechanic/login (Public)
 router.post(
   '/mechanic/login',
   validateRequest(mechanicLoginSchema),
   handleError(loginMechanic)
 );
 
-// Admin List & Create
+// Admin List & Create (Protected with verifyAdmin)
 router
   .route(adminPaths.admin.base)
-  .get(handleError(controller.getAdmins))
-  .post(validateRequest(adminCreateSchema), handleError(controller.register));
+  .get(verifyAdmin, handleError(controller.getAdmins))
+  .post(verifyAdmin, validateRequest(adminCreateSchema), handleError(controller.register));
 
-// Alternative list route
-router.get(adminPaths.admin.list, handleError(controller.getAdmins));
+// Alternative list route (Protected with verifyAdmin)
+router.get(adminPaths.admin.list, verifyAdmin, handleError(controller.getAdmins));
 
-// Admin Details, Update, and Delete
+// Admin Details, Update, and Delete (Protected with verifyAdmin)
 router
   .route(adminPaths.admin.byId)
-  .get(handleError(controller.getAdminById))
-  .put(validateRequest(adminUpdateSchema), handleError(controller.updateAdmin))
-  .delete(handleError(controller.deleteAdmin));
+  .get(verifyAdmin, handleError(controller.getAdminById))
+  .put(verifyAdmin, validateRequest(adminUpdateSchema), handleError(controller.updateAdmin))
+  .delete(verifyAdmin, handleError(controller.deleteAdmin));
 
 export default router;

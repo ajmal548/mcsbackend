@@ -29,7 +29,7 @@ const getCloudinary = () => {
 export const uploadBufferToCloudinary = (
   buffer: Buffer,
   folder: string,
-  resourceType: 'image' | 'auto' = 'image'
+  resourceType: 'image' | 'video' | 'raw' | 'auto' = 'auto'
 ): Promise<UploadApiResponse> => {
   const client = getCloudinary();
   return new Promise((resolve, reject) => {
@@ -46,7 +46,10 @@ export const uploadBufferToCloudinary = (
   });
 };
 
-export const deleteFromCloudinary = async (publicId: string, resourceType: 'image' | 'raw' = 'image') => {
+export const deleteFromCloudinary = async (
+  publicId: string,
+  resourceType: 'image' | 'video' | 'raw' = 'image'
+) => {
   const client = getCloudinary();
   return client.uploader.destroy(publicId, { resource_type: resourceType });
 };

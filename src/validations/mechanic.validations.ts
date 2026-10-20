@@ -61,16 +61,31 @@ export const createMechanicSchema = z.object({
 
     address: addressSchema,
     location: z
-      .object({
-        lat: z.number(),
-        long: z.number(),
-      })
+      .union([
+        z.object({
+          latitude: z.number().min(-90).max(90),
+          longitude: z.number().min(-180).max(180),
+        }),
+        z.object({
+          lat: z.number().min(-90).max(90),
+          long: z.number().min(-180).max(180),
+        }),
+        z.object({
+          type: z.literal('Point').default('Point'),
+          coordinates: z.tuple([z.number().min(-180).max(180), z.number().min(-90).max(90)]),
+        }),
+      ])
       .optional(),
 
     kyc: z.array(kycDocSchema).optional().default([]),
     kycStatus: z.enum(['pending', 'approved', 'rejected']).optional().default('pending'),
     radius: z.number().min(1).max(100).optional().default(5),
-    status: z.enum(['pending', 'approved', 'rejected', 'active', 'inactive']).optional().default('pending'),
+    status: z.enum(['pending', 'approved', 'rejected', 'active', 'inactive', 'verified']).optional().default('pending'),
+    termsId: z.string({ message: 'termsId is required' }).min(1, 'termsId is required'),
+    termsVersion: z.string({ message: 'termsVersion is required' }).min(1, 'termsVersion is required'),
+    accepted: z.boolean({ message: 'accepted is required' }).refine((val) => val === true, {
+      message: 'You must accept the Terms & Conditions to complete registration',
+    }),
   }),
 });
 
@@ -91,23 +106,78 @@ export const updateMechanicSchema = z.object({
 
     address: addressSchema.partial().optional(),
     location: z
-      .object({
-        lat: z.number(),
-        long: z.number(),
-      })
+      .union([
+        z.object({
+          latitude: z.number().min(-90).max(90),
+          longitude: z.number().min(-180).max(180),
+        }),
+        z.object({
+          lat: z.number().min(-90).max(90),
+          long: z.number().min(-180).max(180),
+        }),
+        z.object({
+          type: z.literal('Point').default('Point'),
+          coordinates: z.tuple([z.number().min(-180).max(180), z.number().min(-90).max(90)]),
+        }),
+      ])
       .optional(),
 
     kyc: z.array(kycDocSchema).optional(),
     kycStatus: z.enum(['pending', 'approved', 'rejected']).optional(),
     radius: z.number().min(1).max(100).optional(),
-    status: z.enum(['pending', 'approved', 'rejected', 'active', 'inactive']).optional(),
+    status: z.enum(['pending', 'approved', 'rejected', 'active', 'inactive', 'verified']).optional(),
+    termsAccepted: z.boolean().optional(),
   }),
 });
 
 export const updateKycSchema = z.object({
+  body: z
+    .object({
+      kyc: z.array(kycDocSchema).optional(),
+      kycStatus: z.enum(['pending', 'approved', 'rejected']).optional(),
+    })
+    .refine((data) => (data.kyc && data.kyc.length > 0) || data.kycStatus !== undefined, {
+      message: 'Either KYC documents or KYC status must be provided',
+    }),
+});
+
+export const deleteKycSchema = z.object({
+  query: z.object({
+    documentType: z.string().optional(),
+  }),
+});
+
+export const updateLocationSchema = z.object({
   body: z.object({
-    kyc: z.array(kycDocSchema).min(1, { message: 'At least one valid KYC document is required' }),
-    kycStatus: z.enum(['pending', 'approved', 'rejected']).optional(),
+    latitude: z
+      .number({ message: 'Latitude is required' })
+      .min(-90, { message: 'Latitude must be between -90 and 90' })
+      .max(90, { message: 'Latitude must be between -90 and 90' }),
+    longitude: z
+      .number({ message: 'Longitude is required' })
+      .min(-180, { message: 'Longitude must be between -180 and 180' })
+      .max(180, { message: 'Longitude must be between -180 and 180' }),
+  }),
+});
+
+export const getNearbyMechanicsSchema = z.object({
+  query: z.object({
+    lat: z
+      .string({ message: 'Latitude (lat) is required' })
+      .refine((val) => !isNaN(Number(val)) && Number(val) >= -90 && Number(val) <= 90, {
+        message: 'lat must be a valid latitude between -90 and 90',
+      }),
+    lng: z
+      .string({ message: 'Longitude (lng) is required' })
+      .refine((val) => !isNaN(Number(val)) && Number(val) >= -180 && Number(val) <= 180, {
+        message: 'lng must be a valid longitude between -180 and 180',
+      }),
+    radius: z
+      .string()
+      .optional()
+      .refine((val) => !val || (!isNaN(Number(val)) && Number(val) > 0), {
+        message: 'radius must be a positive number in meters',
+      }),
   }),
 });
 
@@ -120,3 +190,13 @@ export const getMechanicsSchema = z.object({
     status: z.string().optional(),
   }),
 });
+
+export const acceptTermsSchema = z.object({
+  body: z.object({
+    termsAccepted: z.boolean({ message: 'termsAccepted boolean is required' }).refine((val) => val === true, {
+      message: 'termsAccepted must be true to agree to Terms and Conditions',
+    }),
+    version: z.string().optional(),
+  }),
+});
+

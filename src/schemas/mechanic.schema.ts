@@ -18,9 +18,16 @@ export interface IAddress {
   fullAddress: string;
 }
 
+export interface IGeoPoint {
+  type: 'Point';
+  coordinates: [number, number]; // [longitude, latitude]
+}
+
 export interface ILocation {
-  lat: number;
-  long: number;
+  lat?: number;
+  long?: number;
+  latitude?: number;
+  longitude?: number;
 }
 
 export interface ICategorySelection {
@@ -51,15 +58,23 @@ export interface IMechanic extends Document {
 
   // Address & Location
   address: IAddress;
-  location?: ILocation;
+  location?: IGeoPoint;
   radius?: number; // Service dispatch radius in km, default 5km
 
   // KYC Verification Documents
   kyc?: IKycDocument[];
   kycStatus?: 'pending' | 'approved' | 'rejected';
+  isVerified?: boolean;
 
   // Automatic Status
-  status: 'pending' | 'approved' | 'rejected' | 'active' | 'inactive';
+  status: 'pending' | 'approved' | 'rejected' | 'active' | 'inactive' | 'verified';
+
+  // Terms & Conditions Agreement
+  termsId?: mongoose.Types.ObjectId | string;
+  termsVersion?: string;
+  termsAccepted?: boolean;
+  termsAcceptedAt?: Date;
+  termsAcceptedIp?: string;
 
   accessTokenVersion?: number;
   tokenVersion?: number;
@@ -115,6 +130,23 @@ const AddressSchema = new Schema(
   { _id: false }
 );
 
+const GeoPointSchema = new Schema(
+  {
+    type: {
+      type: String,
+      enum: ['Point'],
+      default: 'Point',
+      required: true,
+    },
+    coordinates: {
+      type: [Number], // [longitude, latitude]
+      required: true,
+      default: [0, 0],
+    },
+  },
+  { _id: false }
+);
+
 const MechanicSchema: Schema = new Schema(
   {
     // Personal details
@@ -138,8 +170,8 @@ const MechanicSchema: Schema = new Schema(
     // Address & Location
     address: { type: AddressSchema, required: true },
     location: {
-      lat: { type: Number },
-      long: { type: Number },
+      type: GeoPointSchema,
+      default: () => ({ type: 'Point', coordinates: [0, 0] }),
     },
     radius: {
       type: Number,
@@ -154,12 +186,41 @@ const MechanicSchema: Schema = new Schema(
       enum: ['pending', 'approved', 'rejected'],
       default: 'pending',
     },
+    isVerified: {
+      type: Boolean,
+      default: false,
+    },
 
     // Automatic Status
     status: {
       type: String,
-      enum: ['pending', 'approved', 'rejected', 'active', 'inactive'],
+      enum: ['pending', 'approved', 'rejected', 'active', 'inactive', 'verified'],
       default: 'pending',
+    },
+
+    // Terms & Conditions Agreement
+    termsId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Terms',
+      default: null,
+      index: true,
+    },
+    termsVersion: {
+      type: String,
+      default: null,
+    },
+    termsAccepted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    termsAcceptedAt: {
+      type: Date,
+      default: null,
+    },
+    termsAcceptedIp: {
+      type: String,
+      default: null,
     },
 
     accessTokenVersion: {
@@ -190,5 +251,6 @@ MechanicSchema.pre('save', async function () {
 });
 
 MechanicSchema.index({ name: 'text', email: 'text', mobile: 'text', 'category.name': 'text' });
+MechanicSchema.index({ location: '2dsphere' });
 
 export default mongoose.model<IMechanic>('Mechanic', MechanicSchema);

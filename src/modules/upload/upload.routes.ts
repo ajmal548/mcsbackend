@@ -3,13 +3,37 @@ import uploadPaths from './upload.paths';
 import * as controller from './upload.controller';
 import { handleError } from '../../utils/helpers';
 import { imageUpload, documentUpload } from '../../middlewares/upload';
+import { verifyAuth } from '../../middlewares/jwtVerification';
 
 const router = Router();
 
-// multipart/form-data: file (image, max 5MB), mechanicId (optional)
-router.post(uploadPaths.profileImage, imageUpload, handleError(controller.uploadProfileImage));
+// Upload Profile Image (Protected with verifyAuth)
+router.post(
+  uploadPaths.profileImage,
+  verifyAuth,
+  imageUpload,
+  handleError(controller.uploadProfileImage)
+);
 
-// multipart/form-data: file (image or PDF, max 10MB), mechanicId (optional)
-router.post(uploadPaths.certificate, documentUpload, handleError(controller.uploadCertificate));
+// Upload Certificate (Protected with verifyAuth)
+router.post(
+  uploadPaths.certificate,
+  verifyAuth,
+  documentUpload,
+  handleError(controller.uploadCertificate)
+);
+
+// Delete Uploaded File (Protected with verifyAuth)
+router.delete(
+  '/file',
+  verifyAuth,
+  handleError(controller.deleteUploadedFile)
+);
+
+router.delete(
+  '/file/:publicId',
+  verifyAuth,
+  handleError(controller.deleteUploadedFile)
+);
 
 export default router;

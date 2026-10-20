@@ -7,12 +7,15 @@ import errorHandler from './middlewares/errorHandler';
 import globalRoutes from './routes/global.routes';
 import AppError from './utils/appError';
 
+import requestIdMiddleware from './middlewares/requestId';
+
 const app = express();
 
 // Middlewares
+app.use(requestIdMiddleware);
 app.use(
   cors({
-    exposedHeaders: ['x-renewed-token'],
+    exposedHeaders: ['x-renewed-token', 'x-request-id'],
   })
 );
 app.use(express.json());

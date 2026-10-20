@@ -1,0 +1,139 @@
+================================================================================
+MYCARSOL BACKEND — GENERAL ARCHITECTURE & PROJECT GUIDELINES
+================================================================================
+
+1. NON-NEGOTIABLE PRINCIPLES
+--------------------------------------------------------------------------------
+- Code quality over speed. Never ship hacks, dead code, commented-out code, or
+  TODOs without a ticket reference.
+- Strict separation of concerns: route → controller → service → repository/model.
+  Each layer has ONE job.
+- Everything is modular and feature-based. No cross-module imports of internals;
+  modules talk exclusively through their public service interface (`index.ts`).
+- Single source of truth: No duplicated logic, constants, or types.
+- Before coding, read the existing module structure and match its patterns.
+  Do not invent a new pattern when one exists.
+- Before implementing any feature, state a short plan: files to create/modify,
+  data flow, edge cases.
+
+
+2. TECH STACK STANDARDS
+--------------------------------------------------------------------------------
+- Runtime & Core: Node.js (LTS), Express, TypeScript (strict mode), MongoDB + Mongoose.
+- Validation: Zod (request & query DTOs).
+- Authentication: JWT with role/permission middleware.
+- Logging: Structured JSON (Pino / Winston) with requestId correlation. Never use console.log.
+- Testing: Jest / Vitest + Supertest (unit & integration tests).
+- Linting & Formatting: ESLint + Prettier, enforced in CI and pre-commit (Husky + lint-staged).
+
+
+3. MODULE DIRECTORY PATTERN
+--------------------------------------------------------------------------------
+Every feature or business domain inside `src/modules/<feature>/` must follow
+a consistent, modular structure:
+
+    src/modules/<feature>/
+      ├── <feature>.routes.ts       # Path + middleware (auth, rbac, validate) + controller
+      ├── <feature>.controller.ts   # Parses input, calls ONE service method, returns envelope
+      ├── <feature>.service.ts      # Pure business logic, orchestration, transactions (no req/res)
+      ├── <feature>.repository.ts   # ONLY layer touching Mongoose models. Returns lean() objects
+      ├── <feature>.model.ts        # Mongoose schema, indexes, hooks, virtuals
+      ├── <feature>.schema.ts       # Zod validation schemas (DTOs: body, query, params)
+      ├── <feature>.types.ts        # Module-specific TypeScript types & interfaces
+      ├── <feature>.constants.ts    # Module-specific enums, constants, status codes
+      ├── <feature>.mapper.ts       # Model to response DTO transformation
+      ├── providers/                # Vendor adapters (if third-party integration needed)
+      │   ├── <vendor>.adapter.ts
+      │   └── provider.interface.ts
+      ├── __tests__/                # Colocated unit and integration tests
+      └── index.ts                  # Public exports of the module only
+
+
+4. CENTRALIZED CONFIGS & ZERO HARDCODED VALUES
+--------------------------------------------------------------------------------
+- Never hardcode endpoint routes, status codes, query limits, or user-facing strings.
+- Define a dedicated `<feature>.constants.ts` or config file per module exporting:
+    * Domain enums (statuses, types, roles, categories).
+    * Route endpoint paths.
+    * Error codes and messaging constants.
+- All environment variables MUST be parsed and validated in `src/config/env.ts`
+  using Zod. Never read `process.env` directly in application code.
+
+
+5. PROVIDER ABSTRACTION PATTERN (PAYMENTS, SMS, STORAGE, EMAIL, EXTERNAL APIS)
+--------------------------------------------------------------------------------
+- Define a provider interface (e.g., `PaymentProvider`, `StorageProvider`) in the module.
+- Each vendor implements it as an adapter in `providers/<vendor>.adapter.ts`.
+- A registry/factory resolves the adapter by key. Services depend on the interface,
+  never on a vendor SDK.
+- Standardize provider statuses/errors into internal domain enums. Never leak
+  vendor-specific fields past the adapter.
+- Webhooks: Verify signature, be idempotent, persist raw payload, map to internal
+  status, and process asynchronously.
+- Adding a new provider must require ZERO changes to service logic.
+
+
+6. API STANDARDS & RESPONSE ENVELOPES
+--------------------------------------------------------------------------------
+- Versioned base path: `/api/v1`
+- RESTful nouns, plural, kebab-case: `/categories`, `/mechanic-profiles/:id`
+- Standard Success Envelope:
+    {
+      "success": true,
+      "message": "Operation completed successfully",
+      "data": <Payload>,
+      "meta": { "page": 1, "limit": 20, "total": 100, "totalPages": 5 } // optional
+    }
+- Standard Error Envelope:
+    {
+      "success": false,
+      "message": "Human-readable error message",
+      "code": "ERROR_CODE",
+      "errors": [],
+      "requestId": "uuid"
+    }
+- HTTP Status Codes:
+    * 200 OK: Successful retrieval / update
+    * 201 Created: Successful resource creation
+    * 204 No Content: Successful deletion (or 200 with boolean verification)
+    * 400 Bad Request: Malformed request / validation failure
+    * 401 Unauthorized: Missing or invalid authentication token
+    * 403 Forbidden: Insufficient permissions / RBAC failure
+    * 404 Not Found: Resource does not exist
+    * 409 Conflict: Duplicate key or state conflict
+    * 422 Unprocessable Entity: Business rule violation
+
+
+7. NON-BLOCKING ASYNC OPERATIONS & BACKGROUND TASKS
+--------------------------------------------------------------------------------
+- Non-critical operations (e.g. notifications, analytics, audit logging, cache warming)
+  must not block the main HTTP response thread.
+- Trigger background operations asynchronously with attached `.catch(...)` error
+  handlers to prevent unhandled promise rejections:
+    emailNotificationService
+      .sendWelcomeEmail(user.email)
+      .catch((err) => logger.error({ err, userId: user._id }, 'Failed to send welcome email'));
+
+
+8. SECURITY & DATA INTEGRITY
+--------------------------------------------------------------------------------
+- Use Helmet for HTTP security headers.
+- CORS restricted to explicit allowlist.
+- Rate limiting on sensitive endpoints (auth, password reset, payment creation).
+- Request size limits and mongo-sanitize to prevent NoSQL injection.
+- Passwords hashed using bcrypt (cost factor >= 12) or argon2.
+- Short-lived access tokens (JWT) with secure refresh token rotation.
+- Never log secrets, passwords, tokens, or PII.
+
+
+9. GIT COMMIT & CODE DELIVERY
+--------------------------------------------------------------------------------
+- Follow Conventional Commits: `feat:`, `fix:`, `refactor:`, `chore:`, `test:`, `docs:`.
+- Reference ticket/issue ID (e.g. `feat(category): add slug generation support MCS-42`).
+- Small, focused commits. One concern per PR.
+- A change is "DONE" only when:
+    * Lint passes (`npm run lint`)
+    * TypeScript compiles without errors (`tsc --noEmit`)
+    * Tests pass (`npm test`)
+    * API documentation is updated
+    * No unused code, console.log, or dead imports

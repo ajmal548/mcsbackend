@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { ZodSchema, ZodError } from 'zod';
+import { sendError } from '../utils/responseHandlers';
 
 const validateRequest = (schema: ZodSchema) => {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -12,15 +13,17 @@ const validateRequest = (schema: ZodSchema) => {
       next();
     } catch (error: any) {
       if (error instanceof ZodError || error?.name === 'ZodError') {
-        res.status(400).json({
-          status: 'fail',
+        const errors = (error.issues || error.errors || []).map((e: any) => ({
+          field: Array.isArray(e.path) ? e.path.join('.') : e.path,
+          message: e.message,
+        }));
+
+        sendError(res, {
           message: 'Validation failed',
-          errors: error.errors
-            ? error.errors.map((e: any) => ({
-                field: e.path.join('.'),
-                message: e.message,
-              }))
-            : error.issues,
+          statusCode: 400,
+          code: 'VALIDATION_ERROR',
+          errors,
+          requestId: req.id,
         });
         return;
       }

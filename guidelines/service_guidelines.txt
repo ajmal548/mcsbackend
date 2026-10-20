@@ -1,0 +1,164 @@
+================================================================================
+MYCARSOL BACKEND — GENERAL SERVICE & CONTROLLER IMPLEMENTATION GUIDELINES
+================================================================================
+
+1. CLEAN CODE & FUNCTION SIGNATURES
+--------------------------------------------------------------------------------
+- Max 3 Direct Arguments:
+  Functions and methods must only accept a maximum of 3 direct arguments. For any
+  additional parameters, optional flags, or contextual objects (e.g. `session`,
+  `skipNotification`, `userContext`, `auditMetadata`), use a typed options object.
+    // BAD
+    updateProfile(id, name, bio, avatar, session, skipNotification);
+
+    // GOOD
+    updateProfile(id: string, dto: UpdateProfileDTO, options?: ServiceOptions);
+
+- Explicit Domain-Aligned Naming:
+  Use descriptive, intention-revealing names:
+  * `handlePostMechanicVerification(...)` instead of `process(...)`
+  * `validateCategorySlugUniqueness(...)` instead of `check(...)`
+  * `calculateServiceBookingTotal(...)` instead of `calc(...)`
+
+
+2. STRICT LAYER RESPONSIBILITIES
+--------------------------------------------------------------------------------
+- Routes (`<feature>.routes.ts`):
+  * Only wire path + middlewares (auth, rbac, validateRequest) + controller.
+  * ZERO business logic or database queries.
+
+- Controllers (`<feature>.controller.ts`):
+  * Parse validated input from `req.body`, `req.params`, `req.query`.
+  * Call exactly ONE service method.
+  * Return response through standard envelope helper (`sendSuccess` / `sendError`).
+  * No database calls, no business rules, no manual try/catch (use `asyncHandler`).
+  * Framework-specific (interacts with `req`, `res`, `next`).
+
+- Services (`<feature>.service.ts`):
+  * Pure business logic and orchestration.
+  * Framework-agnostic: NEVER pass Express `req`, `res`, or `next` into services.
+  * Throw typed `AppError` subclasses for business and validation failures.
+  * Own database transactions (Mongoose ClientSession) when multiple writes must be atomic.
+  * Return plain data or verification payloads.
+
+- Repositories (`<feature>.repository.ts`):
+  * The ONLY layer permitted to directly execute Mongoose model operations.
+  * Always return plain objects using `.lean()` on queries.
+  * Contain NO business logic.
+
+- Models (`<feature>.model.ts`):
+  * Mongoose schemas, indexes, validation, virtuals, and hooks.
+
+- Mappers (`<feature>.mapper.ts`):
+  * Transform raw database representations into client-facing response DTOs.
+  * Ensure internal fields (`passwordHash`, `__v`, internal provider tokens) are stripped.
+
+
+3. SERVICE RESPONSE CONVENTIONS
+--------------------------------------------------------------------------------
+- Mutations (Create / Update / Toggle Status / Delete):
+  * Return a pure verification boolean flag payload.
+  * Do NOT return the full Mongoose model document.
+  * Standard return formats:
+      create:        return { categoryCreated: true, categoryId: created._id.toString() };
+      update:        return { categoryUpdated: true };
+      toggleStatus:  return { categoryStatusUpdated: true };
+      delete:        return { categoryDeleted: true };
+
+- Resource Details (Get By ID):
+  * Detail methods must return the mapped, sanitized entity directly:
+      const entity = await this.repository.findById(id);
+      if (!entity) throw new NotFoundError('Category not found');
+      return toCategoryResponseDTO(entity);
+
+- List Retrieval (Paginated):
+  * All list methods must return paginated items with standard metadata:
+      return {
+        items: entities.map(toCategoryResponseDTO),
+        meta: { page, limit, total, totalPages: Math.ceil(total / limit) }
+      };
+
+
+4. DEFENSIVE DATA HANDLING & MONGOOSE LEAKS
+--------------------------------------------------------------------------------
+- Always use `.lean()` on read-only queries (`find`, `findOne`, `findById`) to
+  prevent Mongoose overhead and property leaks (`$__`, `$__parent`, `_doc`).
+- When working with Mongoose document instances before returning, always call
+  `.toObject()` to strip internal state.
+- Validate MongoDB ObjectIds defensively before querying to prevent cast exceptions:
+  Use a helper `toObjectId(id)` or Zod's `z.string().regex(/^[0-9a-fA-F]{24}$/)`.
+
+
+5. ATOMIC DATABASE MUTATIONS VS `.save()`
+--------------------------------------------------------------------------------
+- Avoid `.save()` on existing documents:
+  * Calling `findOne()` then `doc.save()` risks race conditions, lost concurrent updates,
+    and adds unnecessary Mongoose tracking overhead.
+  * Instead, use direct atomic updates (`updateOne`, `updateMany`, `findByIdAndUpdate`)
+    with `$set` or `$inc` operators.
+
+- Pattern A — Direct 1-Step Atomic Update (for simple mutations like toggle status & soft delete):
+  * Do NOT query the document first if no validation against existing fields is needed.
+  * Execute `updateOne` directly and verify `matchedCount`:
+      const result = await this.categoryModel.updateOne(
+        { _id: id, isDeleted: false },
+        { $set: { isActive } }
+      );
+      if (result.matchedCount === 0) {
+        throw new NotFoundError('Category not found');
+      }
+      return { categoryStatusUpdated: true };
+
+- Pattern B — Lean Query + Validate + Atomic Update (for complex updates):
+  * When updates require business validation against existing fields:
+      1. Fetch with `.lean()`:
+         `const existing = await this.categoryModel.findOne({ _id: id, isDeleted: false }).lean();`
+         `if (!existing) throw new NotFoundError('Category not found');`
+      2. Perform business validations (uniqueness, permissions, state machine checks):
+         `if (dto.name && dto.name !== existing.name) { ... }`
+      3. Commit atomic update:
+         `await this.categoryModel.updateOne({ _id: id }, { $set: updateFields });`
+         `return { categoryUpdated: true };`
+
+
+6. MULTI-DOCUMENT TRANSACTIONS (MONGO SESSIONS)
+--------------------------------------------------------------------------------
+- Any business action requiring writes across multiple documents or collections
+  MUST use a Mongoose ClientSession transaction.
+- Example Pattern:
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    try {
+      await this.orderRepository.create(orderData, { session });
+      await this.walletRepository.deductBalance(userId, amount, { session });
+      await session.commitTransaction();
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      await session.endSession();
+    }
+
+
+7. IN-MEMORY LOOKUPS & PERFORMANCE
+--------------------------------------------------------------------------------
+- Keep validations, code lookups, and parameter resolutions fast (< 1ms).
+- Never trigger external HTTP/network calls inside synchronous CRUD transactions.
+- Use local in-memory caches or Redis for frequently accessed lookup dictionaries.
+- Heavy third-party lookups belong in dedicated standalone endpoints.
+
+
+8. ERROR HANDLING & UNIFORM EXCEPTIONS
+--------------------------------------------------------------------------------
+- Use specific `AppError` subclasses:
+    * `NotFoundError` (404)
+    * `ValidationError` (400)
+    * `UnauthorizedError` (401)
+    * `ForbiddenError` (403)
+    * `ConflictError` (409)
+    * `UnprocessableEntityError` (422)
+- Controllers wrap handlers with `asyncHandler`:
+    export const getCategory = asyncHandler(async (req: Request, res: Response) => {
+      const result = await categoryService.getById(req.params.id);
+      sendSuccess(res, result);
+    });

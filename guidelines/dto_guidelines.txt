@@ -1,0 +1,136 @@
+================================================================================
+MYCARSOL BACKEND — GENERAL DTO & REQUEST/RESPONSE GUIDELINES
+================================================================================
+
+1. STANDARD RESPONSE ENVELOPES
+--------------------------------------------------------------------------------
+- All API responses must follow the uniform envelope structure:
+    * Success Envelope:
+        {
+          "success": true,
+          "message": "Operation completed successfully",
+          "data": <Payload>,
+          "meta": { "page": 1, "limit": 20, "total": 100, "totalPages": 5 } // for paginated lists
+        }
+    * Error Envelope:
+        {
+          "success": false,
+          "message": "Error description",
+          "code": "VALIDATION_ERROR",
+          "errors": [ ... ],
+          "requestId": "req-uuid"
+        }
+- Use centralized response utilities (`sendSuccess(res, data, message, statusCode, meta)`
+  and `sendError(res, error)`) to ensure uniform API structure.
+
+
+2. MUTATION RESPONSE CONVENTIONS (CREATE / UPDATE / TOGGLE STATUS / DELETE)
+--------------------------------------------------------------------------------
+- All mutation endpoints across all modules must return a clean verification boolean flag.
+- DO NOT return the entire created/updated database document in mutation responses.
+- Standard naming convention for verification flags across all entities:
+    * Create:        `<entityName>Created: boolean`
+    * Update:        `<entityName>Updated: boolean`
+    * Toggle Status: `<entityName>StatusUpdated: boolean`
+    * Delete:        `<entityName>Deleted: boolean`
+
+Generalized Examples:
+    // Create Category Response Payload
+    {
+      "success": true,
+      "message": "Category created successfully",
+      "data": {
+        "categoryCreated": true,
+        "categoryId": "65f29..." // only return identifier when client requires immediate reference
+      }
+    }
+
+    // Update Category Response Payload
+    {
+      "success": true,
+      "message": "Category updated successfully",
+      "data": {
+        "categoryUpdated": true
+      }
+    }
+
+    // Toggle Category Status Response Payload
+    {
+      "success": true,
+      "message": "Category status updated successfully",
+      "data": {
+        "categoryStatusUpdated": true
+      }
+    }
+
+    // Delete Category Response Payload
+    {
+      "success": true,
+      "message": "Category deleted successfully",
+      "data": {
+        "categoryDeleted": true
+      }
+    }
+
+
+3. RESOURCE DETAIL RESPONSE DTOS (GET BY ID)
+--------------------------------------------------------------------------------
+- For single-resource retrieval (`getById`), return the sanitized entity object directly
+  via its response mapper (`<feature>.mapper.ts`).
+- Never leak internal Mongoose state (`$__`, `$__parent`, `_doc`, `__v`) or sensitive
+  fields (passwords, salts, internal tokens).
+- Always transform Mongoose ObjectIds and Dates to clean ISO strings in the mapper.
+
+Generalized Example:
+    // category.mapper.ts
+    export const toCategoryResponseDTO = (category: ICategoryLean): CategoryResponseDTO => ({
+      id: category._id.toString(),
+      name: category.name,
+      slug: category.slug,
+      description: category.description ?? null,
+      isActive: category.isActive,
+      createdAt: category.createdAt.toISOString(),
+      updatedAt: category.updatedAt.toISOString(),
+    });
+
+
+4. PAGINATED LIST RESPONSE DTOS (GET LIST)
+--------------------------------------------------------------------------------
+- All paginated endpoints must return query results inside `data` (as an array)
+  and metadata inside `meta`.
+- Standard pagination metadata schema:
+    meta: {
+      page: number,
+      limit: number,
+      total: number,
+      totalPages: number
+    }
+- Query parameters must be validated by Zod:
+    * `page`: integer >= 1 (default: 1)
+    * `limit`: integer between 1 and 100 (capped; default: 20)
+    * `sort`: allowed field whitelist (default: -createdAt)
+    * `search`: string trimmed, sanitized
+
+
+5. REQUEST DTOS (ZOD SCHEMAS & VALIDATION)
+--------------------------------------------------------------------------------
+- All incoming requests (body, query, params) must be validated using Zod schemas
+  in `<feature>.schema.ts`.
+- Derive strong TypeScript types directly using `z.infer<typeof Schema>`.
+- Use a reusable validation middleware:
+    `validateRequest({ body: CreateCategorySchema, query: ListCategoryQuerySchema })`
+- Form fields with codes & labels:
+    * Provide a standardized identifier field (`code: string` or `value: string`).
+    * Provide an optional human-readable label field (`label?: string` or `displayName?: string`).
+- Nested Objects & Arrays:
+    * Declare explicit schemas for nested sub-objects.
+    * Use `.array()` with min/max item limits and `.strict()` where appropriate to reject unknown fields.
+- Example Zod Request Schema:
+    export const CreateCategorySchema = z.object({
+      name: z.string().trim().min(2, 'Name must be at least 2 characters').max(100),
+      slug: z.string().trim().toLowerCase().optional(),
+      description: z.string().trim().max(500).optional(),
+      isActive: z.boolean().default(true),
+    });
+
+    export type CreateCategoryDTO = z.infer<typeof CreateCategorySchema>;
