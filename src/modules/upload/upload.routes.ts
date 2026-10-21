@@ -3,22 +3,22 @@ import uploadPaths from './upload.paths';
 import * as controller from './upload.controller';
 import { handleError } from '../../utils/helpers';
 import { imageUpload, documentUpload } from '../../middlewares/upload';
-import { verifyAuth } from '../../middlewares/jwtVerification';
+import { verifyAuth, optionalAuth } from '../../middlewares/jwtVerification';
 
 const router = Router();
 
-// Upload Profile Image (Protected with verifyAuth)
+// Upload Profile Image (Optional Auth: allows unauthenticated uploads during registration)
 router.post(
   uploadPaths.profileImage,
-  verifyAuth,
+  optionalAuth,
   imageUpload,
   handleError(controller.uploadProfileImage)
 );
 
-// Upload Certificate (Protected with verifyAuth)
+// Upload Certificate (Optional Auth: allows unauthenticated uploads during registration)
 router.post(
   uploadPaths.certificate,
-  verifyAuth,
+  optionalAuth,
   documentUpload,
   handleError(controller.uploadCertificate)
 );

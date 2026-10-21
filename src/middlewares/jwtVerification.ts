@@ -196,6 +196,43 @@ export const verifyAuth = async (
   }
 };
 
+export const optionalAuth = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return next();
+  }
+
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded: any = jwt.decode(token);
+    if (!decoded) return next();
+
+    if (decoded?.role === 'admin') {
+      return verifyAdmin(req, res, (err?: any) => {
+        if (err) {
+          req.admin = undefined;
+          req.user = undefined;
+        }
+        next();
+      });
+    }
+
+    return verifyMechanic(req, res, (err?: any) => {
+      if (err) {
+        req.mechanic = undefined;
+        req.user = undefined;
+      }
+      next();
+    });
+  } catch {
+    return next();
+  }
+};
+
 export const verifySelfOrAdmin = async (
   req: AuthRequest,
   res: Response,
